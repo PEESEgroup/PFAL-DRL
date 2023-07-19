@@ -25,5 +25,14 @@ To run the codes in this repository, the following Python and core package versi
 - Scipy 1.10.1
 - Numpy 1.23.5
 
+## Running the code
+### Running code for single growing period (28 days)
+The files `drl_test.py` and `baseline_test.py` are used to run a simulation for a single growing period (28 days) using the DRL strategy and the baseline strategy respectively. To run either of the files, simply create an instance of the PFAL environment with the mean monthly outdoor temperature and outdoor relative humidity values, that is `env = PFALEnv(23, 0.79)`, and run the respective file.
+
+### Running code for twelve growing periods (one year)
+The file `main_simulation.py` is used to run a year-long simulation for a given location and environmental regulation system. The function `simulate(a,b,c)` where *a* is a LIST containing the monthly outdoor location data, *b* is a STRING indicating either 'drl' or 'baseline', and *c* is a STRING indicating the name of the location for data storage. An example usage is `data = simulate(weather_conditions_ithaca, 'drl', 'ithaca')`.
+
 ## Citation
 Please use the following citation when using the data, methods or results of this work:
+
+Decardi-Nelson, B., You, F. Harnessing AI to boost energy savings in plant factories for sustainable food production. *Submitted to Nature Food*.
