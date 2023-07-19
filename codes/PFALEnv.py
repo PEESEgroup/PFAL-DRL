@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Fri Dec 23 16:51:42 2022
-
-@author: decar
-"""
 
 # imports
 import gymnasium as gym
