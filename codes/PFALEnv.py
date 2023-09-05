@@ -73,13 +73,13 @@ class PFALEnv(gym.Env):
         self.c_elec = 0.2051 # 0.0786 # 0.2051 # [$/kWh] price of electricity: 
         self.c_led_eff = 0.52 # 
         self.c_grow_area = 80 # m^2
-        self.c_COP = 3
+        self.c_COP = 3 # coefficient of performance 
         
         
         # equipment capacity and costs
-        self.c_dehum_cap = 6/3600/self.c_grow_area # 10*0.5194/3600./self.c_grow_area # kg/m^2.s
+        self.c_dehum_cap = 6/3600/self.c_grow_area # kg/m^2.s
         self.c_dehum_eev = 3.0 # kg/kW.h
-        self.c_vent_fan_cap = 3000/3600/self.c_grow_area # 1.128012356/self.c_grow_area   # m^3/m^2.s
+        self.c_vent_fan_cap = 3000/3600/self.c_grow_area # m^3/m^2.s
         self.fan_eff = 1000.*0.00047194745*15 # m^3/s/kW
         
         # simulation settings
@@ -101,24 +101,30 @@ class PFALEnv(gym.Env):
             (-4.25, self.from_relative_humidity(-4.25,0.86), self.from_ppm(400.)) # January
             )
         self.env_con = None
-        
+
+        # nighttime and daytime air temperature range
         self.temp_range = ((18,20), (22,25))
         
+        # air absolute humidity range
         self.humidity_range = (self.from_relative_humidity(self.temp_range[0][0],0.7), 
                                self.from_relative_humidity(self.temp_range[1][1],0.8))
-        
+
+        # air carbon dioxide concentration range
         self.carbon_range = (self.from_ppm(800), self.from_ppm(1200)) # ppm or umol/mol
-        
+
+        # photoperiod. 16 hours on period, 8 hours off period
         self.photo_period = (16, 8)
-        
+
+        # input scaling values
         self.uscale = np.array([
             100./2, # light intensity [W/m^2]
             0.015/3600/2, # 1.2E-6/2, # CO2 supply rate [kg/m^2/s]
             self.c_dehum_cap/2, # dehumidification rate [kg/m^2/s]
             212., # Heating/Cooling rate [W/m^2]
-            self.c_vent_fan_cap/2, # ventilation rate []
+            self.c_vent_fan_cap/2, # ventilation rate [m/s]
             ])
-        
+
+        # state scaling values
         self.xscale = np.array([
             1., # non-structural dry weight [kg/m^2]
             1., # structural dry weight [kg/m^2]
@@ -135,16 +141,17 @@ class PFALEnv(gym.Env):
             ])
         
         # gym parameters
+        # observation space
         self.observation_space = gym.spaces.Box(
             low = np.zeros(len(self.xscale)-1,dtype=np.float32), 
             high = np.ones(len(self.xscale)-1,dtype=np.float32)
             )
-        
+        # action space
         self.action_space = gym.spaces.Box(
             low = -np.ones(len(self.uscale),dtype=np.float32), 
             high = np.ones(len(self.uscale),dtype=np.float32)
             )
-        
+        # this shift is used to handle positively constrained inputs
         self.ushift = np.array([1., 1., 1., 0., 1.])
         
         # true state of the system
@@ -179,7 +186,7 @@ class PFALEnv(gym.Env):
         # initialize reward
         reward = 0
         
-        # add external states to the input
+        # augment external states to the input
         uw = np.concatenate((u,self.state[8:11]))
         
         # next state
@@ -199,19 +206,22 @@ class PFALEnv(gym.Env):
         xxp = self.unscale_states(xp)
         uu = self.unscale_inputs(u)
         
-        
+        # disturbances/external conditions
         w = xx[8:11]
         # disturbance processing
         xCo = w[1]
         xTo = w[0]
         xHo = w[2]
-        
+
+        # state processing
         xC = xx[2]
         xT = xx[3]
         xH = xx[4]
-        
+
+        # ventilation rate
         uV = uu[4]
-        
+
+        # resource exchange between indoor and outdoor environments
         phi_vent_c = uV*(xC - xCo) # CO2 exchange
         Q_vent_q = self.c_cap_q_v*uV*(xT - xTo)
         phi_vent_h = uV*(xH - xHo)
@@ -322,13 +332,16 @@ class PFALEnv(gym.Env):
         
         # comment if training
         self.env_con = np.array([self.temp, self.from_relative_humidity(self.temp,self.rel), self.from_ppm(400.)])
-        
+
+        # create time-varying information prior to the start of an episode
         self.tvp = self.tv_data(self.env_con)
-        
+
+        # initial conditions
+        # lower bound
         xlb = np.array([xDi*0.25, xDi*0.75, self.from_ppm(1000), 23., self.from_relative_humidity(23.,0.75)] )
-        
+        # upper bound
         xub = np.array([xDi*0.25, xDi*0.75, self.from_ppm(1000), 23., self.from_relative_humidity(23.,0.75)] )
-        
+        # scale initial conditions
         xlb = np.concatenate((xlb/self.xscale[:5], self.tvp[0]))
         xub = np.concatenate((xub/self.xscale[:5], self.tvp[0]))
         
@@ -345,7 +358,8 @@ class PFALEnv(gym.Env):
         self.obs_state = np.concatenate((np.array([x[0]+x[1]]), x[2:]))
         
         return deepcopy(self.obs_state)
-        
+
+    # rendering environment not implemented
     def render():
         pass
     
@@ -433,11 +447,13 @@ class PFALEnv(gym.Env):
         x_dot = [xDn_dot, xDs_dot, xC_dot, xT_dot, xH_dot]
         
         return x_dot
-    
+
+    # scaled ode
     def ode_scaled(self, t, x, u):
         x_dot = np.array(self.ode(t,x,u))
         return x_dot/self.xscale[:5]
-    
+
+    # integrate for one time step
     def one_step_sim(self, x, u):
         
         e_xC_hi = lambda t, x, u: x[2] - 1 - self.eps
@@ -516,7 +532,6 @@ class PFALEnv(gym.Env):
         
     
     # conversions
-    
     def to_ppm(self, x):
         return x/(0.0409*44.1*1E-6)
     
