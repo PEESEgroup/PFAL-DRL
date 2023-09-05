@@ -24,6 +24,7 @@ To run the codes in this repository, the following Python and core package versi
 - Gymnasium 0.28.1
 - Scipy 1.10.1
 - Numpy 1.23.5
+- Matplotlib 3.7.2
 
 ## Running the code
 ### Running code for single growing period (28 days)
