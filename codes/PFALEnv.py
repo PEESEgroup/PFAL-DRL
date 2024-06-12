@@ -10,7 +10,7 @@ from copy import deepcopy
 # Plant factory with artificial lighting environment class
 class PFALEnv(gym.Env):
     
-    def __init__(self, temp=20.15, rel=0.8):
+    def __init__(self, temp=20.15, rel=0.8, c_eps=17E-9, c_lar_s=75, c_tau=0.07):
         
         # outdoor for tests
         self.temp = temp
@@ -24,11 +24,11 @@ class PFALEnv(gym.Env):
         self.c_car_1 = -1.32E-5 # [m/s/degree Celsius^2]
         self.c_car_2 = 5.94E-4 # [m/s/degree Celsisu]
         self.c_car_3 = -2.64E-3 # [m/s]
-        self.c_eps = 17E-9 # [kg/J]
+        self.c_eps = c_eps # 17E-9 # [kg/J]
         self.c_fw = 22.5
         self.c_Gamma = 7.32E-5 # [kg/m^3]
         self.c_k = 0.9 # [-]
-        self.c_lar_s = 75 # -3 # [m^2/kg]
+        self.c_lar_s = c_lar_s# 75 # -3 # [m^2/kg]
         self.c_par = 1 # [-]
         self.c_Q10_Gamma = 2 # [-]
         self.c_Q10_gr = 1.6 # [-]
@@ -38,7 +38,7 @@ class PFALEnv(gym.Env):
         self.c_resp_s = 3.47E-7 # [1/s]
         self.c_resp_r = 1.16E-7 # [1/s]
         self.c_stm = 0.007 # [m/s]
-        self.c_tau = 0.07 # [-]. in paper it was 0.15
+        self.c_tau = c_tau # 0.07 # [-]. in paper it was 0.15
         self.c_d2f = 0.04 # kg DW to kg FW
         
         # climate parameters
@@ -53,26 +53,26 @@ class PFALEnv(gym.Env):
         self.c_T_abs = 273. # [K]
         
         self.c_U = 0.3 # [W/m^2 C]
-        self.c_Length = 12.19 # [m]
-        self.c_Width = 2.44 # [m]
-        self.c_Height = 2.59 # [m]
+        self.c_Length = 12.2 # [m]
+        self.c_Width = 2.5 # [m]
+        self.c_Height = 3.0 # [m]
         self.c_surface_area = (self.c_Length*self.c_Width + 
                                2*(self.c_Width*self.c_Height + 
                                   self.c_Length*self.c_Height))
         self.c_volume = self.c_Length*self.c_Width*self.c_Height
-        
-        self.c_cap_c = self.c_Height # 4.1 # [m]
-        self.c_cap_h = self.c_Height # 4.1 # [m]
-        self.c_cap_q = 30000 # [J/m^2/degree Celsius]
-        self.c_cap_q_p = 1000 # [J/kg/degree Celsius]
-        self.c_cap_q_v = 1290 # [J/m^3/degree Celsius]
+        self.c_grow_area = 80.0 # m^2
+        self.c_cap_c = self.c_volume/self.c_grow_area # 4.1 # [m]
+        self.c_cap_h = self.c_volume/self.c_grow_area # 4.1 # [m]
+        self.c_cap_q = 30000.0 # [J/m^2/degree Celsius]
+        self.c_cap_q_p = 1000.0 # [J/kg/degree Celsius]
+        self.c_cap_q_v = 1290.0 # [J/m^3/degree Celsius]
         self.c_lat_water = 2256.4 # [kJ/kg]
         
         self.c_CO2 = 0.2 # Wei-Han# 0.45 # 5.5 [$/kg] price of carbon dioxide: 
         self.c_lettuce = 4/.9 # [$/ kg of lettuce]
         self.c_elec = 0.2051 # 0.0786 # 0.2051 # [$/kWh] price of electricity: 
         self.c_led_eff = 0.52 # 
-        self.c_grow_area = 80 # m^2
+        
         self.c_COP = 3 # coefficient of performance 
         
         
@@ -94,7 +94,7 @@ class PFALEnv(gym.Env):
         self.j = None
         self.j_max = int(1*24*3600/self.sampling_time) # 1 day operation for when uncertainty is updated
         self.k = None
-        self.t_max = int(28*24*3600/self.sampling_time) # 28 days maximum growing 
+        self.t_max = int(5*24*3600/self.sampling_time) # 28 days maximum growing # change to 5 for hyperparameter optimization
         
         self.external_conditions = (
             (20.15, self.from_relative_humidity(20.15,0.8), self.from_ppm(400.)),  # July
@@ -161,6 +161,27 @@ class PFALEnv(gym.Env):
         
         # flag to use the true state or observed state
         self.uncertain = 0
+
+    def calculate_cost(self, u):
+        
+        uu = self.unscale_inputs(u)
+        dt = self.sampling_time
+        
+        # calculate individual control costs 
+        c_CO2 = self.c_CO2 * uu[1] *dt # $/m^2
+        c_light = 1E-3 * uu[0] * (dt/3600) # kWh/m^2
+        c_dehum = (uu[2]/self.c_dehum_eev) * dt # kWh/m^2
+        c_vent = (uu[4]/self.fan_eff) * (dt/3600) # kWh/m^2
+
+        c_E = 1E-3 * uu[3] * (dt/3600)/self.c_COP # kWh/m^2
+        c_E = (c_E * c_E)**(1/2)
+        
+        # control cost
+        c_electric = (c_light + c_dehum + c_vent + c_E)
+        
+        c_control = c_CO2 + c_electric*self.c_elec
+
+        return c_control
     
     # step function
     def step(self, action):
@@ -292,7 +313,7 @@ class PFALEnv(gym.Env):
         # terminal
         done_term = not (
             # xx[0] < self.DESIRED_LETTUCE_WEIGHT
-            self.k < self.t_max
+            self.k < self.t_max or status == 0
             )
         
         done = done_term # or done_cons
@@ -315,7 +336,7 @@ class PFALEnv(gym.Env):
             self.obs_state[0] = xD
             # self.obs_state[1] = xDs
         
-        return deepcopy(self.obs_state), reward/100, done, info
+        return deepcopy(self.obs_state), reward/100, done, False, info
     
     # reset environment
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
@@ -331,7 +352,7 @@ class PFALEnv(gym.Env):
         self.env_con = self.np_random.uniform(low=env_con_lb, high=env_con_ub)
         
         # comment if training
-        self.env_con = np.array([self.temp, self.from_relative_humidity(self.temp,self.rel), self.from_ppm(400.)])
+        # self.env_con = np.array([self.temp, self.from_relative_humidity(self.temp,self.rel), self.from_ppm(400.)])
 
         # create time-varying information prior to the start of an episode
         self.tvp = self.tv_data(self.env_con)
@@ -357,7 +378,7 @@ class PFALEnv(gym.Env):
         self.state = deepcopy(x)
         self.obs_state = np.concatenate((np.array([x[0]+x[1]]), x[2:]))
         
-        return deepcopy(self.obs_state)
+        return deepcopy(self.obs_state), {}
 
     # rendering environment not implemented
     def render():
