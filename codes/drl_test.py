@@ -35,7 +35,7 @@ policy = load_policy_cpu(policy, exp)
 policy.eval()
 
 # initial state
-x = env.reset()
+x,_ = env.reset()
 
 # data storage
 t = []

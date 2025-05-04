@@ -49,7 +49,7 @@ def simulate(weather_conditions, strategy, loc):
         dt = env.sampling_time
         
         # initial state
-        x = env.reset()
+        x,_ = env.reset()
         
         # data storage
         t = []
