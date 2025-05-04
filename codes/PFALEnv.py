@@ -311,10 +311,7 @@ class PFALEnv(gym.Env):
                 }
         
         # terminal
-        done_term = not (
-            # xx[0] < self.DESIRED_LETTUCE_WEIGHT
-            self.k < self.t_max or status == 0
-            )
+        done_term = (self.k >= self.t_max) or (status != 0)
         
         done = done_term # or done_cons
         
